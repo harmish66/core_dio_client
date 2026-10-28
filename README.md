@@ -1,19 +1,53 @@
 # core_dio_client
 
-A production-ready HTTP network client for Flutter and Dart built on Dio with auto-retry, auth token refresh, structured logging, request cancellation, and progress tracking for downloads and uploads.
+[![pub package](https://img.shields.io/pub/v/core_dio_client.svg?style=flat-square)](https://pub.dev/packages/core_dio_client)
+[![pub points](https://img.shields.io/pub/points/core_dio_client?style=flat-square)](https://pub.dev/packages/core_dio_client/score)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](https://github.com/harmish66/core_dio_client/blob/main/LICENSE)
+[![platform](https://img.shields.io/badge/platform-flutter%20%7C%20dart-blue?style=flat-square)](https://pub.dev/packages/core_dio_client)
 
-## Features
+A production-ready HTTP network client for Flutter and Dart built on Dio. Provides auto-retry, auth token refresh, structured logging, request cancellation, and progress tracking for downloads and uploads.
 
-- Configurable singleton ApiClient wrapping Dio
-- Typed HTTP request methods: GET, POST, PUT, DELETE, and PATCH
-- File download with real-time `onReceiveProgress` callback
-- Single and multi-file multipart uploads with `onSendProgress` callback
-- Request cancellation support across all methods using `CancelToken`
-- Pre-flight network connectivity checker hook to fail fast when offline
-- Synchronized token refresh flow on 401 Unauthorized errors
-- Automatic retry with exponential backoff and randomized jitter
-- Structured console request and response logging with header redaction and body truncation
-- Structured `ApiResponse<T>` result wrapper and categorized `ApiException` error types
+---
+
+## Architectural Flow
+
+```text
+[ Application Layer ]
+         |
+         v
+[ ApiClient Singleton ]
+         |
+         +--> [ Connectivity Check ] -> Fails immediately if offline
+         |
+         +--> [ AuthInterceptor ] -> Injects Bearer token from secure storage
+         |
+         +--> [ LoggingInterceptor ] -> Formats output, redacts sensitive headers
+         |
+         +--> [ RetryInterceptor ] -> Exponential backoff with jitter on 5xx/network errors
+         |
+         +--> [ 401 Refresh Handler ] -> Synchronized token refresh queue
+         |
+         v
+[ Remote Server / API ]
+```
+
+---
+
+## Feature Matrix
+
+| Feature | Supported | Details |
+| :--- | :--- | :--- |
+| HTTP Methods | Yes | Full typed support for GET, POST, PUT, PATCH, DELETE |
+| File Uploads | Yes | Single and multi-file multipart uploads with onSendProgress callback |
+| File Downloads | Yes | Direct file saving with onReceiveProgress callback |
+| Request Cancellation | Yes | CancelToken support across every network operation |
+| Pre-Flight Connectivity | Yes | Custom checker callback to prevent wasteful timeouts when offline |
+| 401 Token Refresh | Yes | Thread-safe queue preventing duplicate refresh network calls |
+| Auto-Retry Mechanism | Yes | Exponential backoff with randomized jitter on network errors and 5xx |
+| Structured Logging | Yes | Formatted request and response logs with sensitive header redaction |
+| Structured Errors | Yes | Normalized ApiException with ApiErrorType classification |
+
+---
 
 ## Installation
 
@@ -24,17 +58,25 @@ dependencies:
   core_dio_client: ^1.0.0
 ```
 
-Then run:
+Fetch the package:
 
 ```bash
 flutter pub get
 ```
 
+Import it in your Dart code:
+
+```dart
+import 'package:core_dio_client/core_dio_client.dart';
+```
+
+---
+
 ## Quick Start
 
-### 1. Initialize the client
+### 1. Initialize ApiClient
 
-Initialize `ApiClient` once during application bootstrap (for example, in your `main()` function):
+Configure the client once during application bootstrap (for example, in `main.dart`):
 
 ```dart
 import 'package:flutter/material.dart';
@@ -63,66 +105,69 @@ void main() {
 }
 ```
 
-### 2. Standard Requests
+---
+
+## Usage Scenarios
+
+### Scenario 1: Standard Requests
 
 ```dart
 final client = ApiClient.instance;
 
-// GET request
-final response = await client.get<Map<String, dynamic>>(
+// GET Request with query parameters
+final profileResponse = await client.get<Map<String, dynamic>>(
   url: '/users/profile',
   params: {'include_details': true},
 );
 
-if (response.success) {
-  print('User profile: ${response.data}');
+if (profileResponse.success) {
+  final data = profileResponse.data;
+  print('User: ${data?['name']}');
 } else {
-  final error = response.error as ApiException;
-  print('Error (${error.statusCode}): ${error.message}');
+  final error = profileResponse.error as ApiException;
+  print('Error [${error.statusCode}]: ${error.message}');
 }
 
-// POST request
+// POST Request with JSON payload
 final createResponse = await client.post<Map<String, dynamic>>(
   url: '/users',
   body: {
     'name': 'Alex Morgan',
-    'role': 'Developer',
+    'email': 'alex@example.com',
   },
 );
 ```
 
-### 3. File Download with Progress
-
-Download files directly to disk while tracking download progress:
+### Scenario 2: File Download with Progress Tracking
 
 ```dart
 final response = await ApiClient.instance.downloadFile(
-  url: 'https://example.com/files/report.pdf',
-  savePath: '/local/storage/path/report.pdf',
+  url: 'https://example.com/assets/document.pdf',
+  savePath: '/storage/documents/document.pdf',
   onReceiveProgress: (receivedBytes, totalBytes) {
     if (totalBytes > 0) {
       final percentage = (receivedBytes / totalBytes * 100).toStringAsFixed(0);
-      print('Download progress: $percentage% ($receivedBytes / $totalBytes bytes)');
+      print('Download: $percentage% ($receivedBytes / $totalBytes bytes)');
     }
   },
 );
 
 if (response.success) {
-  print('File saved to: ${response.data}');
+  print('Saved to: ${response.data}');
 }
 ```
 
-### 4. File Upload with Progress
+### Scenario 3: Single and Multi-File Multipart Uploads
 
-#### Single File Upload
+#### Single File
 ```dart
-final file = File('/path/to/avatar.png');
+final file = File('/storage/pictures/avatar.jpg');
 
 final response = await ApiClient.instance.uploadFile<Map<String, dynamic>>(
   url: '/users/avatar',
   file: file,
   fileKey: 'avatar',
-  data: {'description': 'Profile image'},
+  data: {'description': 'Profile picture'},
   onSendProgress: (sentBytes, totalBytes) {
     if (totalBytes > 0) {
       final percentage = (sentBytes / totalBytes * 100).toStringAsFixed(0);
@@ -132,125 +177,146 @@ final response = await ApiClient.instance.uploadFile<Map<String, dynamic>>(
 );
 ```
 
-#### Multiple Files Upload
+#### Multiple Files
 ```dart
 final files = [
-  File('/path/to/doc1.pdf'),
-  File('/path/to/doc2.pdf'),
+  File('/storage/invoices/inv_01.pdf'),
+  File('/storage/invoices/inv_02.pdf'),
 ];
 
 final response = await ApiClient.instance.uploadFiles<Map<String, dynamic>>(
-  url: '/documents/batch',
+  url: '/invoices/batch',
   files: files,
-  fileKey: 'attachments',
-  data: {'category': 'invoices'},
+  fileKey: 'documents',
+  data: {'fiscal_year': 2026},
+  onSendProgress: (sent, total) {
+    print('Batch upload: $sent / $total bytes');
+  },
 );
 ```
 
-### 5. Request Cancellation
+### Scenario 4: Request Cancellation
 
-Cancel ongoing requests at any time using `CancelToken`:
+Use `CancelToken` to abort long-running requests when a screen is closed or when the user navigates away:
 
 ```dart
 final cancelToken = ApiClient.createCancelToken();
 
-// Start long-running request
-final future = ApiClient.instance.get<dynamic>(
-  url: '/large-dataset',
+// Initiate request
+final requestFuture = ApiClient.instance.get<dynamic>(
+  url: '/reports/large-export',
   cancelToken: cancelToken,
 );
 
-// Cancel the operation when user navigates away or presses cancel
-cancelToken.cancel('User navigated away');
+// Cancel when needed
+void onUserCancelled() {
+  cancelToken.cancel('User aborted operation');
+}
 
-final response = await future;
+final response = await requestFuture;
 if (!response.success) {
   final error = response.error as ApiException;
   if (error.type == ApiErrorType.cancelled) {
-    print('Request was cancelled.');
+    print('Operation was cancelled.');
   }
 }
 ```
 
-### 6. Offline Pre-Flight Connectivity Check
+### Scenario 5: Pre-Flight Offline Connectivity Check
 
-Avoid unnecessary request timeouts by checking network state before firing requests:
+Avoid unnecessary request timeouts by verifying network reachability before dispatching requests:
 
 ```dart
 ApiClient.initialize(
   config: NetworkConfig(
     baseUrl: 'https://api.example.com',
     connectivityChecker: () async {
-      // Replace with your connectivity check logic (e.g. connectivity_plus)
-      return await checkInternetReachability();
+      // Connect to your favorite network status library
+      return await internetChecker.hasConnection;
     },
   ),
 );
 ```
 
-### 7. Token Refresh on 401 Unauthorized
+If the callback returns `false`, `ApiClient` throws an `ApiException` with `ApiErrorType.network` immediately without executing network calls.
 
-Handle expired access tokens transparently without race conditions:
+### Scenario 6: Synchronized 401 Token Refresh
+
+When multiple requests encounter a 401 Unauthorized status simultaneously, `ApiClient` queues the requests, executes a single token refresh call, and replays all pending requests with the refreshed token:
 
 ```dart
 ApiClient.initialize(
   config: const NetworkConfig(baseUrl: 'https://api.example.com'),
-  tokenProvider: () async => await secureStorage.read(key: 'access_token'),
+  tokenProvider: () async => await storage.read(key: 'access_token'),
   refreshTokenHandler: (refreshDio) async {
-    final refreshToken = await secureStorage.read(key: 'refresh_token');
+    final currentRefreshToken = await storage.read(key: 'refresh_token');
     try {
-      final refreshResponse = await refreshDio.post(
-        '/auth/refresh',
-        data: {'refresh_token': refreshToken},
+      final res = await refreshDio.post(
+        '/auth/token/refresh',
+        data: {'refresh_token': currentRefreshToken},
       );
-      final newAccessToken = refreshResponse.data['access_token'];
-      await secureStorage.write(key: 'access_token', value: newAccessToken);
+      final newAccessToken = res.data['access_token'];
+      await storage.write(key: 'access_token', value: newAccessToken);
       return true;
     } catch (_) {
-      // Clear credentials and prompt login
+      // Return false if refresh token has expired
       return false;
     }
   },
 );
 ```
 
-### 8. Logging and Redaction
+### Scenario 7: Structured Logging with Sensitive Data Redaction
 
-The built-in `LoggingInterceptor` formats request and response payloads with automatic redaction of sensitive headers (`Authorization`, `Cookie`, `Set-Cookie`):
+Headers containing authentication tokens or cookies are automatically masked with `<REDACTED>`:
 
 ```dart
 ApiClient.initialize(
   config: const NetworkConfig(baseUrl: 'https://api.example.com'),
   enableLogging: true,
-  logPrint: (line) {
-    // Optionally redirect logs to your custom logger or Crashlytics
-    debugPrint(line);
+  logPrint: (logLine) {
+    // Pipe directly to your production logger or Crashlytics
+    debugPrint(logLine);
   },
 );
 ```
 
-## Error Handling
+---
 
-All client methods return an `ApiResponse<T>`:
+## Configuration Reference
 
-```dart
-final response = await ApiClient.instance.get<Map<String, dynamic>>(url: '/item/1');
+### NetworkConfig
 
-if (response.success) {
-  print('Result: ${response.data}');
-} else {
-  final error = response.error as ApiException;
-  print('Error message: ${error.message}');
-  print('Status code: ${error.statusCode}');
-  print('Error type: ${error.type}'); // network, timeout, cancelled, server, client, parse, unknown
-}
-```
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `baseUrl` | `String` | Required | Target API base URL |
+| `defaultHeaders` | `Map<String, String>` | `{}` | Headers attached to every outgoing request |
+| `timeout` | `Duration` | `30s` | Connect, receive, and send timeout duration |
+| `maxRetries` | `int` | `2` | Number of exponential backoff retry attempts |
+| `connectivityChecker` | `Future<bool> Function()?` | `null` | Pre-flight internet reachability hook |
 
-## Repository and Publisher Details
+### ApiErrorType
 
-- Repository: `https://github.com/harmish66/core_dio_client`
-- Issue Tracker: `https://github.com/harmish66/core_dio_client/issues`
+| Enum Value | Description |
+| :--- | :--- |
+| `network` | No internet connection, host lookup failure, or socket failure |
+| `timeout` | Connection, send, or receive timeout exceeded |
+| `cancelled` | Request cancelled via CancelToken |
+| `server` | HTTP response status 500 through 599 |
+| `client` | HTTP response status 400 through 499 (excluding handled 401) |
+| `parse` | Data parsing or JSON decoding failure |
+| `unknown` | Unclassified exception |
+
+---
+
+## Repository and Support
+
+- GitHub Repository: [https://github.com/harmish66/core_dio_client](https://github.com/harmish66/core_dio_client)
+- Issue Tracker: [https://github.com/harmish66/core_dio_client/issues](https://github.com/harmish66/core_dio_client/issues)
+- Package Registry: [https://pub.dev/packages/core_dio_client](https://pub.dev/packages/core_dio_client)
+
+---
 
 ## License
 
-MIT
+MIT License. See [LICENSE](https://github.com/harmish66/core_dio_client/blob/main/LICENSE) for full details.
