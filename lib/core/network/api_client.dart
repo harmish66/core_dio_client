@@ -1,5 +1,5 @@
 // ApiClient: a singleton wrapper around Dio providing typed request methods,
-// interceptors, timeout, retry, and file upload support.
+// interceptors, timeout, retry, file upload, download, and cancellation support.
 import 'dart:async';
 import 'dart:io';
 
@@ -23,9 +23,17 @@ class ApiClient {
   Stream<ApiException>? _errorStream;
 
   final Future<bool> Function(Dio)? _refreshTokenHandler;
+  final Future<bool> Function()? _connectivityChecker;
   Completer<bool>? _refreshCompleter;
 
-  ApiClient._(this._dio, {void Function(ApiException)? onError, Future<bool> Function(Dio)? refreshTokenHandler}) : _onErrorCallback = onError, _refreshTokenHandler = refreshTokenHandler {
+  ApiClient._(
+    this._dio, {
+    void Function(ApiException)? onError,
+    Future<bool> Function(Dio)? refreshTokenHandler,
+    Future<bool> Function()? connectivityChecker,
+  })  : _onErrorCallback = onError,
+        _refreshTokenHandler = refreshTokenHandler,
+        _connectivityChecker = connectivityChecker {
     _dio.interceptors.add(InterceptorsWrapper(
       onError: (err, handler) async {
         try {
@@ -84,10 +92,15 @@ class ApiClient {
 
   /// Internal constructor for testing.
   @visibleForTesting
-  ApiClient.forTest(Dio dio, {Future<bool> Function(Dio)? refreshTokenHandler, void Function(ApiException)? onError})
-      : _dio = dio,
+  ApiClient.forTest(
+    Dio dio, {
+    Future<bool> Function(Dio)? refreshTokenHandler,
+    void Function(ApiException)? onError,
+    Future<bool> Function()? connectivityChecker,
+  })  : _dio = dio,
         _onErrorCallback = onError,
-        _refreshTokenHandler = refreshTokenHandler {
+        _refreshTokenHandler = refreshTokenHandler,
+        _connectivityChecker = connectivityChecker {
     _dio.interceptors.add(InterceptorsWrapper(
       onError: (err, handler) async {
         try {
@@ -144,7 +157,16 @@ class ApiClient {
     ));
   }
 
-  static void initialize({required NetworkConfig config, TokenProvider? tokenProvider, bool enableLogging = false, void Function(ApiException)? onError, Future<bool> Function(Dio)? refreshTokenHandler}) {
+  /// Initialize the singleton client. Call this once at app startup.
+  static void initialize({
+    required NetworkConfig config,
+    TokenProvider? tokenProvider,
+    bool enableLogging = false,
+    void Function(ApiException)? onError,
+    Future<bool> Function(Dio)? refreshTokenHandler,
+    Future<bool> Function()? connectivityChecker,
+    void Function(String line)? logPrint,
+  }) {
     final dio = Dio(BaseOptions(baseUrl: config.baseUrl, headers: config.defaultHeaders));
     dio.options.connectTimeout = config.timeout;
     dio.options.receiveTimeout = config.timeout;
@@ -153,18 +175,32 @@ class ApiClient {
     if (tokenProvider != null) {
       dio.interceptors.add(AuthInterceptor(tokenProvider));
     }
-    dio.interceptors.add(LoggingInterceptor(enabled: enableLogging));
+    dio.interceptors.add(LoggingInterceptor(enabled: enableLogging, logPrint: logPrint));
     dio.interceptors.add(RetryInterceptor(dio: dio, maxRetries: config.maxRetries));
 
-    _instance = ApiClient._(dio, onError: onError, refreshTokenHandler: refreshTokenHandler);
+    _instance = ApiClient._(
+      dio,
+      onError: onError,
+      refreshTokenHandler: refreshTokenHandler,
+      connectivityChecker: connectivityChecker ?? config.connectivityChecker,
+    );
   }
 
+  /// Access the singleton instance.
   static ApiClient get instance {
     if (_instance == null) {
       throw StateError('ApiClient not initialized. Call ApiClient.initialize(...) first.');
     }
     return _instance!;
   }
+
+  /// Reset the singleton instance (mainly for testing or user logout).
+  static void reset() {
+    _instance = null;
+  }
+
+  /// Helper to create a new CancelToken.
+  static CancelToken createCancelToken() => CancelToken();
 
   Dio get dio => _dio;
 
@@ -187,23 +223,57 @@ class ApiClient {
     return _errorStream!;
   }
 
-  /// Perform a GET request.
-  Future<ApiResponse<T>> get<T>({required String url, Map<String, dynamic>? params, Map<String, String>? headers}) async {
-    try {
-      final response = await _dio.get(url, queryParameters: params, options: Options(headers: headers));
-      return ApiResponse.success(response.data as T);
-    } on DioException catch (e) {
-      return ApiResponse.failure(ApiException.fromDio(e));
+  Future<void> _assertConnectivity() async {
+    final checker = _connectivityChecker;
+    if (checker != null) {
+      final hasConnection = await checker();
+      if (!hasConnection) {
+        throw ApiException('No internet connection', type: ApiErrorType.network);
+      }
     }
   }
 
-  /// POST request with optional body and query parameters.
-  Future<ApiResponse<T>> post<T>({required String url, dynamic body, Map<String, dynamic>? params, Map<String, String>? headers}) async {
+  /// Perform a GET request.
+  Future<ApiResponse<T>> get<T>({
+    required String url,
+    Map<String, dynamic>? params,
+    Map<String, String>? headers,
+    CancelToken? cancelToken,
+  }) async {
     try {
-      dynamic data = body;
-      Options options = Options(headers: headers);
+      await _assertConnectivity();
+      final response = await _dio.get(
+        url,
+        queryParameters: params,
+        options: Options(headers: headers),
+        cancelToken: cancelToken,
+      );
+      return ApiResponse.success(response.data as T);
+    } on DioException catch (e) {
+      return ApiResponse.failure(ApiException.fromDio(e));
+    } on ApiException catch (e) {
+      return ApiResponse.failure(e);
+    } catch (e) {
+      return ApiResponse.failure(ApiException(e.toString()));
+    }
+  }
 
-      // Handle File upload automatically if body contains a File
+  /// POST request with optional body, query parameters, progress callbacks, and cancel token.
+  Future<ApiResponse<T>> post<T>({
+    required String url,
+    dynamic body,
+    Map<String, dynamic>? params,
+    Map<String, String>? headers,
+    CancelToken? cancelToken,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
+    try {
+      await _assertConnectivity();
+      dynamic data = body;
+      final options = Options(headers: headers);
+
+      // Handle automatic File upload if body contains File instances
       if (body is Map<String, dynamic>) {
         bool hasFile = false;
         final map = <String, dynamic>{};
@@ -211,7 +281,10 @@ class ApiClient {
           if (entry.value is File) {
             hasFile = true;
             final file = entry.value as File;
-            map[entry.key] = await MultipartFile.fromFile(file.path, filename: file.path.split(Platform.pathSeparator).last);
+            map[entry.key] = await MultipartFile.fromFile(
+              file.path,
+              filename: file.path.split(Platform.pathSeparator).last,
+            );
           } else {
             map[entry.key] = entry.value;
           }
@@ -222,40 +295,245 @@ class ApiClient {
         }
       }
 
-      final response = await _dio.post(url, data: data, queryParameters: params, options: options);
+      final response = await _dio.post(
+        url,
+        data: data,
+        queryParameters: params,
+        options: options,
+        cancelToken: cancelToken,
+        onSendProgress: onSendProgress,
+        onReceiveProgress: onReceiveProgress,
+      );
       return ApiResponse.success(response.data as T);
     } on DioException catch (e) {
       return ApiResponse.failure(ApiException.fromDio(e));
+    } on ApiException catch (e) {
+      return ApiResponse.failure(e);
+    } catch (e) {
+      return ApiResponse.failure(ApiException(e.toString()));
     }
   }
 
-  /// PUT request
-  Future<ApiResponse<T>> put<T>({required String url, dynamic body, Map<String, dynamic>? params, Map<String, String>? headers}) async {
+  /// PUT request.
+  Future<ApiResponse<T>> put<T>({
+    required String url,
+    dynamic body,
+    Map<String, dynamic>? params,
+    Map<String, String>? headers,
+    CancelToken? cancelToken,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
     try {
-      final response = await _dio.put(url, data: body, queryParameters: params, options: Options(headers: headers));
+      await _assertConnectivity();
+      final response = await _dio.put(
+        url,
+        data: body,
+        queryParameters: params,
+        options: Options(headers: headers),
+        cancelToken: cancelToken,
+        onSendProgress: onSendProgress,
+        onReceiveProgress: onReceiveProgress,
+      );
       return ApiResponse.success(response.data as T);
     } on DioException catch (e) {
       return ApiResponse.failure(ApiException.fromDio(e));
+    } on ApiException catch (e) {
+      return ApiResponse.failure(e);
+    } catch (e) {
+      return ApiResponse.failure(ApiException(e.toString()));
     }
   }
 
-  /// DELETE request
-  Future<ApiResponse<T>> delete<T>({required String url, Map<String, dynamic>? params, Map<String, String>? headers}) async {
+  /// DELETE request.
+  Future<ApiResponse<T>> delete<T>({
+    required String url,
+    dynamic body,
+    Map<String, dynamic>? params,
+    Map<String, String>? headers,
+    CancelToken? cancelToken,
+  }) async {
     try {
-      final response = await _dio.delete(url, queryParameters: params, options: Options(headers: headers));
+      await _assertConnectivity();
+      final response = await _dio.delete(
+        url,
+        data: body,
+        queryParameters: params,
+        options: Options(headers: headers),
+        cancelToken: cancelToken,
+      );
       return ApiResponse.success(response.data as T);
     } on DioException catch (e) {
       return ApiResponse.failure(ApiException.fromDio(e));
+    } on ApiException catch (e) {
+      return ApiResponse.failure(e);
+    } catch (e) {
+      return ApiResponse.failure(ApiException(e.toString()));
     }
   }
 
-  /// PATCH request
-  Future<ApiResponse<T>> patch<T>({required String url, dynamic body, Map<String, dynamic>? params, Map<String, String>? headers}) async {
+  /// PATCH request.
+  Future<ApiResponse<T>> patch<T>({
+    required String url,
+    dynamic body,
+    Map<String, dynamic>? params,
+    Map<String, String>? headers,
+    CancelToken? cancelToken,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+  }) async {
     try {
-      final response = await _dio.patch(url, data: body, queryParameters: params, options: Options(headers: headers));
+      await _assertConnectivity();
+      final response = await _dio.patch(
+        url,
+        data: body,
+        queryParameters: params,
+        options: Options(headers: headers),
+        cancelToken: cancelToken,
+        onSendProgress: onSendProgress,
+        onReceiveProgress: onReceiveProgress,
+      );
       return ApiResponse.success(response.data as T);
     } on DioException catch (e) {
       return ApiResponse.failure(ApiException.fromDio(e));
+    } on ApiException catch (e) {
+      return ApiResponse.failure(e);
+    } catch (e) {
+      return ApiResponse.failure(ApiException(e.toString()));
+    }
+  }
+
+  /// Download a file to disk with progress callback and cancel token support.
+  Future<ApiResponse<String>> downloadFile({
+    required String url,
+    required String savePath,
+    ProgressCallback? onReceiveProgress,
+    CancelToken? cancelToken,
+    Map<String, dynamic>? params,
+    Map<String, String>? headers,
+    bool deleteOnError = true,
+  }) async {
+    try {
+      await _assertConnectivity();
+      final response = await _dio.download(
+        url,
+        savePath,
+        queryParameters: params,
+        options: Options(headers: headers),
+        onReceiveProgress: onReceiveProgress,
+        cancelToken: cancelToken,
+        deleteOnError: deleteOnError,
+      );
+      if (response.statusCode != null && response.statusCode! >= 200 && response.statusCode! < 300) {
+        return ApiResponse.success(savePath);
+      }
+      return ApiResponse.failure(
+        ApiException(
+          'Failed to download file: HTTP ${response.statusCode}',
+          statusCode: response.statusCode,
+          type: ApiErrorType.server,
+        ),
+      );
+    } on DioException catch (e) {
+      return ApiResponse.failure(ApiException.fromDio(e));
+    } on ApiException catch (e) {
+      return ApiResponse.failure(e);
+    } catch (e) {
+      return ApiResponse.failure(ApiException(e.toString()));
+    }
+  }
+
+  /// Upload a single file with optional extra form data, upload progress, and cancel token.
+  Future<ApiResponse<T>> uploadFile<T>({
+    required String url,
+    required File file,
+    String fileKey = 'file',
+    String? filename,
+    Map<String, dynamic>? data,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+    CancelToken? cancelToken,
+    Map<String, String>? headers,
+  }) async {
+    try {
+      await _assertConnectivity();
+      final actualFilename = filename ?? file.path.split(Platform.pathSeparator).last;
+      final multipartFile = await MultipartFile.fromFile(file.path, filename: actualFilename);
+
+      final map = <String, dynamic>{
+        fileKey: multipartFile,
+      };
+      if (data != null) {
+        map.addAll(data);
+      }
+
+      final formData = FormData.fromMap(map);
+      final response = await _dio.post(
+        url,
+        data: formData,
+        options: Options(
+          headers: headers,
+          contentType: 'multipart/form-data',
+        ),
+        onSendProgress: onSendProgress,
+        onReceiveProgress: onReceiveProgress,
+        cancelToken: cancelToken,
+      );
+      return ApiResponse.success(response.data as T);
+    } on DioException catch (e) {
+      return ApiResponse.failure(ApiException.fromDio(e));
+    } on ApiException catch (e) {
+      return ApiResponse.failure(e);
+    } catch (e) {
+      return ApiResponse.failure(ApiException(e.toString()));
+    }
+  }
+
+  /// Upload multiple files with progress tracking and cancel token.
+  Future<ApiResponse<T>> uploadFiles<T>({
+    required String url,
+    required List<File> files,
+    String fileKey = 'files',
+    Map<String, dynamic>? data,
+    ProgressCallback? onSendProgress,
+    ProgressCallback? onReceiveProgress,
+    CancelToken? cancelToken,
+    Map<String, String>? headers,
+  }) async {
+    try {
+      await _assertConnectivity();
+      final multipartFiles = <MultipartFile>[];
+      for (final f in files) {
+        final filename = f.path.split(Platform.pathSeparator).last;
+        multipartFiles.add(await MultipartFile.fromFile(f.path, filename: filename));
+      }
+
+      final map = <String, dynamic>{
+        fileKey: multipartFiles,
+      };
+      if (data != null) {
+        map.addAll(data);
+      }
+
+      final formData = FormData.fromMap(map);
+      final response = await _dio.post(
+        url,
+        data: formData,
+        options: Options(
+          headers: headers,
+          contentType: 'multipart/form-data',
+        ),
+        onSendProgress: onSendProgress,
+        onReceiveProgress: onReceiveProgress,
+        cancelToken: cancelToken,
+      );
+      return ApiResponse.success(response.data as T);
+    } on DioException catch (e) {
+      return ApiResponse.failure(ApiException.fromDio(e));
+    } on ApiException catch (e) {
+      return ApiResponse.failure(e);
+    } catch (e) {
+      return ApiResponse.failure(ApiException(e.toString()));
     }
   }
 }

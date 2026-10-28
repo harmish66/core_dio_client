@@ -1,26 +1,38 @@
-# Release v1.0.0
+# Release Notes - core_dio_client v1.0.0
 
 ## Highlights
 
-- Initial stable release of core_api_client_package
-- Features: ApiClient singleton, GET/POST/PUT/DELETE, file upload, interceptors (auth, logging, retry), ApiResponse/ApiException types
-- Added structured logging with pretty JSON
-- Added tests and CI workflow
+- Stable initial release of core_dio_client.
+- Production-ready Dio wrapper for Flutter and Dart applications.
+- Features: ApiClient singleton, GET/POST/PUT/DELETE/PATCH, download with progress, single and multi-file uploads with progress, request cancellation with CancelToken, offline pre-flight connectivity check, auth token refresh queue, exponential backoff retry, and structured logging.
 
-## Patch notes
+## Detailed Changelog
 
-- feat(logging): structured pretty API logs
-- feat(logging): add truncation & redaction options (maxBodyChars, redactHeaders, sensitiveHeaders)
-- docs: add logging truncation and redaction guidance
-- test: add interceptor and ApiException unit tests
-- ci: add coverage upload step
+- feat(download): added downloadFile method with real-time onReceiveProgress callback and savePath destination.
+- feat(upload): added uploadFile and uploadFiles multipart helpers with onSendProgress tracking.
+- feat(cancellation): integrated CancelToken support across all HTTP methods.
+- feat(connectivity): added connectivityChecker callback to fail fast when offline.
+- feat(auth): thread-safe 401 token refresh queue to eliminate race conditions.
+- feat(retry): exponential backoff with randomized jitter on network errors and 5xx status codes.
+- feat(logging): pretty-printed request/response logs with sensitive header redaction and body truncation.
+- feat(errors): structured ApiResponse<T> wrapper and ApiErrorType classification.
+- test: added test suite covering download, upload, cancellation, retry, and auth refresh flows.
 
 ## Usage
 
-Pin to v1.0.0 in your pubspec.yaml:
+Add to your pubspec.yaml:
 
-core_api_client_package:
-  git:
-    url: https://github.com/harmishanaxistech-ship-it/core_api_client_package_android.git
-    ref: v1.0.0
+```yaml
+dependencies:
+  core_dio_client: ^1.0.0
+```
 
+Or via Git:
+
+```yaml
+dependencies:
+  core_dio_client:
+    git:
+      url: https://github.com/harmish66/core_dio_client.git
+      ref: v1.0.0
+```

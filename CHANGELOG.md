@@ -1,23 +1,12 @@
-## 1.1.1
-
-* Fixed `empty_catches` lint issues in `ApiClient` and `ApiException`.
-* Updated dependencies (`dio`, `meta`) and added `collection` to satisfy pub.dev analysis.
-* Improved error handling in `ApiClient` during token refresh.
-
-## 1.1.0
-
-* Renamed package to `core_api_client`.
-* Updated API methods to use named parameters (`url`, `body`, `params`, `headers`).
-* Added automatic `File` detection in `post` body for easier uploads.
-* Improved debug logging format with clear separators and pretty-printed JSON.
-
 ## 1.0.0
 
-* Initial release.
-* Features:
-    * Singleton ApiClient wrapping Dio.
-    * Support for GET, POST, PUT, DELETE.
-    * File upload (multipart) support.
-    * Interceptors: Logging, Auth, Retry (exponential backoff).
-    * Configurable timeouts, headers, and base URL.
-    * ApiResponse wrapper and ApiException for structured errors.
+* Initial release under `core_dio_client`.
+* Complete Dio wrapper providing singleton access and typed HTTP operations (GET, POST, PUT, DELETE, PATCH).
+* Added `downloadFile` method with real-time `onReceiveProgress` tracking.
+* Added `uploadFile` and `uploadFiles` multipart helpers with `onSendProgress` tracking.
+* Added `CancelToken` integration across all HTTP methods for request cancellation.
+* Added `connectivityChecker` pre-flight callback in `NetworkConfig` to fail fast when offline.
+* Thread-safe 401 token refresh queue and retry flow via `refreshTokenHandler`.
+* Exponential backoff retry interceptor with jitter for network errors and 5xx responses.
+* Configurable, structured logging interceptor with sensitive header redaction and body truncation.
+* Standardized `ApiResponse<T>` wrapper and categorized `ApiException` error handling.

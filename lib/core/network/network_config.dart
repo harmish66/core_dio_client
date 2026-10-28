@@ -9,13 +9,18 @@ class NetworkConfig {
   /// Request timeout
   final Duration timeout;
 
-  /// Number of automatic retry attempts (for idempotent operations / network errors)
+  /// Number of automatic retry attempts for transient failures
   final int maxRetries;
+
+  /// Optional connectivity checker callback.
+  /// If provided and returns false, requests fail fast with network error.
+  final Future<bool> Function()? connectivityChecker;
 
   const NetworkConfig({
     required this.baseUrl,
     this.defaultHeaders = const {},
     this.timeout = const Duration(seconds: 30),
     this.maxRetries = 2,
+    this.connectivityChecker,
   });
 }

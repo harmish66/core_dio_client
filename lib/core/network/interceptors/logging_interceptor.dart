@@ -8,6 +8,7 @@ class LoggingInterceptor extends Interceptor {
   final int maxBodyChars;
   final bool redactHeaders;
   final Set<String> sensitiveHeaders;
+  final void Function(String line)? logPrint;
   static int _nextId = 1;
 
   LoggingInterceptor({
@@ -15,6 +16,7 @@ class LoggingInterceptor extends Interceptor {
     this.maxBodyChars = 10240, // 10 KB
     this.redactHeaders = true,
     Set<String>? sensitiveHeaders,
+    this.logPrint,
   }) : sensitiveHeaders = (sensitiveHeaders ?? const {'authorization', 'cookie', 'set-cookie'});
 
   String _prettyJson(dynamic value) {
@@ -65,9 +67,13 @@ class LoggingInterceptor extends Interceptor {
   }
 
   void _printLog(String text) {
-    // Using print instead of developer.log to match requested format exactly
     for (var line in text.split('\n')) {
-      print(line);
+      if (logPrint != null) {
+        logPrint!(line);
+      } else {
+        // ignore: avoid_print
+        print(line);
+      }
     }
   }
 

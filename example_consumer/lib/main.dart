@@ -1,16 +1,16 @@
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
-import 'package:core_api_client/core_api_client.dart';
+import 'package:core_dio_client/core_dio_client.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
   ApiClient.initialize(
-    config: NetworkConfig(
+    config: const NetworkConfig(
       baseUrl: 'https://jsonplaceholder.typicode.com',
       defaultHeaders: {'Accept': 'application/json'},
-      timeout: const Duration(seconds: 15),
+      timeout: Duration(seconds: 15),
       maxRetries: 2,
     ),
     tokenProvider: () async => null,
@@ -48,7 +48,7 @@ class _ConsumerHomeState extends State<ConsumerHome> {
       developer.log('Fetched todo', name: 'consumer');
       setState(() => _output = res.data.toString());
     } else {
-      developer.log('Fetch failed: ${res.error}', name: 'consumer');
+      developer.log('Fetch error: ${res.error}', name: 'consumer');
       setState(() => _output = 'Error: ${res.error}');
     }
   }
@@ -56,16 +56,21 @@ class _ConsumerHomeState extends State<ConsumerHome> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Consumer App Demo')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            ElevatedButton(onPressed: _fetchTodo, child: const Text('Fetch /todos/1')),
-            const SizedBox(height: 12),
-            Expanded(child: SingleChildScrollView(child: Text(_output))),
-          ],
+      appBar: AppBar(title: const Text('Consumer App')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_output, textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: _fetchTodo,
+                child: const Text('Fetch Todo'),
+              ),
+            ],
+          ),
         ),
       ),
     );

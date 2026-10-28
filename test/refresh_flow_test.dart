@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:dio/dio.dart';
-import 'package:core_api_client/core/network/api_client.dart';
+import 'package:core_dio_client/core/network/api_client.dart';
 
 class MockInterceptorsWrapper extends Mock implements InterceptorsWrapper {}
 

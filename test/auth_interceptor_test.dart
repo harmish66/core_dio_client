@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:dio/dio.dart';
-import 'package:core_api_client/core/network/interceptors/auth_interceptor.dart';
+import 'package:core_dio_client/core/network/interceptors/auth_interceptor.dart';
 
 void main() {
   test('AuthInterceptor adds Authorization header when token present', () async {
