@@ -1,3 +1,9 @@
+## 1.0.1
+
+* Optimized package description in pubspec.yaml to meet pub.dev recommended length constraints (60 to 180 characters).
+* Removed unused cupertino_icons dependency to reduce package footprint.
+* Updated README documentation with architecture diagrams and feature matrix.
+
 ## 1.0.0
 
 * Initial release under `core_dio_client`.

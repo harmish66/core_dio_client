@@ -1,10 +1,10 @@
 name: core_dio_client
-description: A production-ready Flutter and Dart HTTP client built on Dio with auto-retry, auth token refresh, structured logging, cancel tokens, and progress tracking for downloads and uploads.
+description: A production-ready Flutter HTTP client built on Dio with auto-retry, token refresh, logging, cancel tokens, and progress tracking for downloads and uploads.
 homepage: https://github.com/harmish66/core_dio_client
 repository: https://github.com/harmish66/core_dio_client
 issue_tracker: https://github.com/harmish66/core_dio_client/issues
 
-version: 1.0.0
+version: 1.0.1
 
 environment:
   sdk: ^3.10.0
@@ -13,7 +13,6 @@ dependencies:
   flutter:
     sdk: flutter
 
-  cupertino_icons: ^1.0.8
   dio: ^5.4.1
   meta: ^1.11.0
   collection: ^1.18.0
